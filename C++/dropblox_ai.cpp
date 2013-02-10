@@ -356,7 +356,7 @@ int heuristic(Bitmap* bitmap, int score) {
     return h;
 }
 
-const int AHEAD = 6, ROTATIONS = 4, NUM_KEEP = 1000;
+const int AHEAD = 5, ROTATIONS = 4, NUM_KEEP = 10;
 
 struct extra {
     // Number of times to move right from the left edge; number of rotations; score added.
@@ -385,6 +385,7 @@ int main(int argc, char** argv) {
 
     for (int x = 0; x < AHEAD; x++) {
         vector<pair<Board*, extra> > new_candidates;
+        fprintf(stderr, "%d\n", (int) candidates.size());
 
         for (int c = 0; c < (int) candidates.size(); c++) {
             Board *board = candidates[c].first;
@@ -403,13 +404,15 @@ int main(int argc, char** argv) {
                 for (int i = 0; i < ROTATIONS; i++) {
                     int score;
                     Board *new_board = board->place(&score);
-                    extra new_e;
-                    new_e.score = e.score + score;
+                    extra new_e = e;
+                    new_e.score += score;
 
                     // Set first move but only if it's first
                     if (e.rights == -1) {
                         new_e.rights = rights;
                         new_e.rotates = i;
+                    } else {
+
                     }
 
                     new_candidates.push_back(make_pair(new_board, new_e));
@@ -437,10 +440,16 @@ int main(int argc, char** argv) {
 
         for (int i = 0; i < min((int) sorted_candidates.size(), NUM_KEEP); i++)
             candidates.push_back(new_candidates[sorted_candidates[i].second]);
+
+        for (int i = 0; i < (int) candidates.size(); i++)
+            fprintf(stderr, "%d %d %d\n", candidates[i].second.rights, candidates[i].second.rotates, candidates[i].second.score);
+
+        fprintf(stderr, "%d\n", x);
     }
 
     Board *board = new Board(state);
     extra move = candidates[0].second;
+    fprintf(stderr, "%d %d %d\n", move.rights, move.rotates, move.score);
 
     // Make some moves!
     vector<string> moves;
