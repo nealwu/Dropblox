@@ -277,6 +277,74 @@ void Board::remove_rows(Bitmap* new_bitmap) {
     }
 }
 
+
+int holes[ROWS][COLS];
+int heuristic(Bitmap* bitmap, int score) {
+    int h = 0;
+
+    /* score multipliers */
+    int SCORE_MULT = 400;
+    int HOLE_MULT = 1;
+    int EVEN_MULT = 10;
+
+    h += score * SCORE_MULT;
+
+    /* mark holes */
+  
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            int below = 0, above = 0;
+            if ((*bitmap)[i][j]) continue;
+            for (int bi = i - 1; bi >= 0; bi--) 
+                if ((*bitmap)[bi][j]) {
+                    above = 1; break;
+                }
+            for (int bi = i + 1; bi < ROWS; bi++) {
+                if ((*bitmap)[bi][j]) {
+                    below = 1; break;
+                }
+            }
+            holes[i][j] = above && below;
+
+        }
+    }
+
+    /* count number of rows with holes */
+    int h_row_holes = 0;
+    for (int i = 0; i < ROWS; i++) {
+        int holes_in_row = 0;
+        for (int j = 0; j < COLS; j++) {
+            holes_in_row += holes[i][j];
+            
+        }
+
+        if (holes_in_row > 0)
+            h_row_holes += COLS - holes_in_row;
+    }
+
+    h -= h_row_holes * HOLE_MULT;
+
+
+    /* check evenness of board */
+    int evenness = 0;
+    int prev_height = 0;
+    int r = 0, j = 0, diff;
+    while (!(*bitmap)[r][j]) r++;
+    prev_height = r;
+
+    for(j = 1; j < COLS; j++) {
+        r = 0;
+        while (!(*bitmap)[r][j]) r++;
+        diff = prev_height - r;
+        if (diff < 0) diff *= -1;
+        evenness += diff;
+        prev_height = r;
+    }
+    h -= EVEN_MULT * evenness;
+
+    return h;
+}
+
 int main(int argc, char** argv) {
     // Construct a JSON Object with the given game state.
     istringstream raw_state(argv[1]);
@@ -290,6 +358,7 @@ int main(int argc, char** argv) {
     vector<string> moves;
     while (board.check(*board.block)) {
         board.block->left();
+        cout << heuristic(&(board.bitmap), 0) << endl;
         moves.push_back("left");
     }
     // Ignore the last move, because it moved the block into invalid
