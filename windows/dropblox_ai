@@ -1,0 +1,199 @@
+#!/usr/bin/env python
+#
+# Sample dropblox_ai exectuable.
+#
+
+import json
+import sys
+import time
+
+class InvalidMoveError(ValueError):
+  pass
+
+# A class representing an (i, j) position on a board.
+class Point(object):
+  def __init__(self, i=0, j=0):
+    self.i = i
+    self.j = j
+
+# A class representing a Block object.
+class Block(object):
+  def __init__(self, center, offsets):
+    # The block's center and offsets should not be mutated.
+    self.center = Point(center['i'], center['j'])
+    self.offsets = tuple(Point(offset['i'], offset['j']) for offset in offsets)
+    # To move the block, we can change the Point "translation" or increment
+    # the value "rotation".
+    self.translation = Point()
+    self.rotation = 0
+
+  # A generator that returns a list of squares currently occupied by this
+  # block. Takes translations and rotations into account.
+  def squares(self):
+    if self.rotation % 2:
+      for offset in self.offsets:
+        yield Point(
+          self.center.i + self.translation.i + (2 - self.rotation)*offset.j,
+          self.center.j + self.translation.j - (2 - self.rotation)*offset.i,
+        )
+    else:
+      for offset in self.offsets:
+        yield Point(
+          self.center.i + self.translation.i + (1 - self.rotation)*offset.i,
+          self.center.j + self.translation.j + (1 - self.rotation)*offset.j,
+        )
+
+  def left(self):
+    self.translation.j -= 1
+
+  def right(self):
+    self.translation.j += 1
+
+  def up(self):
+    self.translation.i -= 1
+
+  def down(self):
+    self.translation.i += 1
+
+  def rotate(self):
+    self.rotation += 1
+
+  def do_command(self, command):
+    assert(command in ('left', 'right', 'up', 'down', 'rotate')), \
+        'Unexpected command %s' % (command,)
+    getattr(self, command)()
+
+  def do_commands(self, commands):
+    for command in commands:
+      self.do_command(command)
+
+  def reset_position(self):
+    (self.translation.i, self.translation.j) = (0, 0)
+    self.rotation = 0
+
+# A class representing a board state. Stores the current block and the
+# preview list and handles commands.
+class Board(object):
+  rows = 33
+  cols = 12
+
+  def __init__(self, bitmap, block, preview):
+    self.bitmap = bitmap
+    self.block = block
+    self.preview = preview
+
+  def __repr__(self):
+    return str(self)
+
+  def __str__(self):
+    return '\n'.join(' '.join('X' if elt else '.' for elt in row) for row in self.bitmap)
+
+  @staticmethod
+  def construct_from_json(state_json):
+    state = json.loads(state_json)
+    block = Block(state['block']['center'], state['block']['offsets'])
+    preview = [Block(data['center'], data['offsets']) for data in state['preview']]
+    return Board(state['bitmap'], block, preview)
+
+  # Returns True if the block is in valid position - that is, if all of its squares
+  # are in bounds and are currently unoccupied.
+  def check(self, block):
+    for square in block.squares():
+      if (square.i < 0 or square.i >= self.rows or
+          square.j < 0 or square.j >= self.cols or
+          self.bitmap[square.i][square.j]):
+        return False
+    return True
+
+  # Handles a list of commands to move the current block, and drops it at the end.
+  # Appends a 'drop' command to the list if it does not appear, and returns the
+  # new Board state object.
+  #
+  # If the block is ever in an invalid position during this method, throws an
+  # InvalidMoveError.
+  def do_commands(self, commands):
+    self.block.reset_position()
+    if not self.check(self.block):
+      raise InvalidMoveError()
+    commands.append('drop')
+    for command in commands:
+      if command == 'drop':
+        new_board = self.place()
+        return new_board
+      else:
+        self.block.do_command(command)
+        if not self.check(self.block):
+          raise InvalidMoveError()
+
+  # Drops the current block as far as it can fall unobstructed, then locks it onto the
+  # board. Returns a new board with the next block drawn from the preview list.
+  #
+  # Assumes the block starts out in valid position.
+  #
+  # If there are no blocks left in the preview list, this method will fail badly!
+  # This is okay because we don't expect to look ahead that far.
+  def place(self):
+    while self.check(self.block):
+      self.block.down()
+    self.block.up()
+    # Deep-copy the bitmap to avoid changing this board's state.
+    new_bitmap = [list(row) for row in self.bitmap]
+    for square in self.block.squares():
+      new_bitmap[square.i][square.j] = 1
+    new_bitmap = Board.remove_rows(new_bitmap)
+    assert(self.preview), "There are no blocks left in the preview list! You can't look that far ahead."
+    return Board(new_bitmap, self.preview[0], self.preview[1:])
+
+  # A helper method used to remove any full rows from a bitmap. Returns the new bitmap.
+  @staticmethod
+  def remove_rows(bitmap):
+    (rows, cols) = (len(bitmap), len(bitmap[0]))
+    new_bitmap = [row for row in bitmap if not all(row)]
+    return [cols*[0] for i in range(rows - len(new_bitmap))] + new_bitmap
+
+# A simple objective function: -1 times the number of holes on the board.
+def minimize_holes_objective(board):
+  block_found = board.cols*[False]
+  num_holes = 0
+  for row in board.bitmap:
+    for j in range(len(row)):
+      if row[j]:
+        block_found[j] = True
+      elif block_found[j]:
+        num_holes += 1
+  return -num_holes
+
+# The main AI method. Takes a board and returns the list of moves that maximize
+# the given objective function.
+def get_best_moves(board, objective):
+  num_invalid_moves = 0
+  best_result = float('-Inf')
+  best_commands = []
+
+  for num_rotations in range(4):
+    for shift in ('left', 'right'):
+      for num_shifts in range(board.cols/2):
+        commands = num_rotations*['rotate'] + num_shifts*[shift]
+        try:
+          next_board = board.do_commands(commands)
+        except InvalidMoveError:
+          num_invalid_moves += 1
+          continue
+        result = objective(next_board)
+        if result > best_result:
+          best_result = result
+          best_commands = commands
+  print '%s/%s moves were invalid' % (num_invalid_moves, 4*2*board.cols/2)
+  return best_commands
+
+if __name__ == '__main__':
+  if len(sys.argv) == 3:
+    # This AI executable will be called with two arguments: a JSON blob of the
+    # game state and the number of seconds remaining in this game.
+    board = Board.construct_from_json(sys.argv[1])
+    seconds_left = float(sys.argv[2])
+    # Compute a list of moves and print them to standard out, then flush stdout
+    # to be sure they're read by our handler!
+    for move in get_best_moves(board, minimize_holes_objective):
+      print move
+    sys.stdout.flush()

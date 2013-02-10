@@ -1,0 +1,4 @@
+This is the Python source for the client and history_server executables.
+
+We've included pre-built binaries for these programs in the OS-specific folders.
+This code is just here so you know what you're running on your machine!
