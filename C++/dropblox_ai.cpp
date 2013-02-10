@@ -256,7 +256,7 @@ Board* Board::place(int *score) {
 }
 
 Board* Board::place() {
-    place(NULL);
+    return place(NULL);
 }
 
 // A static method that takes in a new_bitmap and removes any full rows from it.
