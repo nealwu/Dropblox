@@ -215,7 +215,7 @@ Board* Board::do_commands(const vector<string>& commands) {
 //
 // If there are no blocks left in the preview list, this method will fail badly!
 // This is okay because we don't expect to look ahead that far.
-Board* Board::place(int *score = NULL) {
+Board* Board::place(int *score) {
     Board* new_board = new Board();
 
     while (check(*block)) {
@@ -253,6 +253,10 @@ Board* Board::place(int *score = NULL) {
     }
 
     return new_board;
+}
+
+Board* Board::place() {
+    place(NULL);
 }
 
 // A static method that takes in a new_bitmap and removes any full rows from it.
@@ -456,4 +460,5 @@ int main(int argc, char** argv) {
     }
 
     cout << flush;
+    return 0;
 }
