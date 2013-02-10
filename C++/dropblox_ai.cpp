@@ -215,13 +215,16 @@ Board* Board::do_commands(const vector<string>& commands) {
 //
 // If there are no blocks left in the preview list, this method will fail badly!
 // This is okay because we don't expect to look ahead that far.
+
 Board* Board::place(int *score) {
     Board* new_board = new Board();
+    Block new_block = *block;
+    new_board->block = &new_block;
 
-    while (check(*block)) {
-        block->down();
+    while (check(new_block)) {
+        new_block.down();
     }
-    block->up();
+    new_block.up();
 
     for (int i = 0; i < ROWS; i++) {
         for (int j = 0; j < COLS; j++) {
@@ -230,15 +233,15 @@ Board* Board::place(int *score) {
     }
 
     Point point;
-    for (int i = 0; i < block->size; i++) {
-        point.i = block->center.i + block->translation.i;
-        point.j = block->center.j + block->translation.j;
-        if (block->rotation % 2) {
-            point.i += (2 - block->rotation)*block->offsets[i].j;
-            point.j +=  -(2 - block->rotation)*block->offsets[i].i;
+    for (int i = 0; i < new_block.size; i++) {
+        point.i = new_block.center.i + new_block.translation.i;
+        point.j = new_block.center.j + new_block.translation.j;
+        if (new_block.rotation % 2) {
+            point.i += (2 - new_block.rotation)*new_block.offsets[i].j;
+            point.j +=  -(2 - new_block.rotation)*new_block.offsets[i].i;
         } else {
-            point.i += (1 - block->rotation)*block->offsets[i].i;
-            point.j += (1 - block->rotation)*block->offsets[i].j;
+            point.i += (1 - new_block.rotation)*new_block.offsets[i].i;
+            point.j += (1 - new_block.rotation)*new_block.offsets[i].j;
         }
         new_board->bitmap[point.i][point.j] = 1;
     }
@@ -295,7 +298,7 @@ int heuristic(Bitmap* bitmap, int score) {
 
     /* score multipliers */
     int SCORE_MULT = 100;
-    int HOLE_MULT = 1;
+    int HOLE_MULT = 3;
     int EVEN_MULT = 1;
 
     h += score * SCORE_MULT;
@@ -304,18 +307,16 @@ int heuristic(Bitmap* bitmap, int score) {
   
     for (int i = 0; i < ROWS; i++) {
         for (int j = 0; j < COLS; j++) {
-            int below = 0, above = 0;
+            int above = 0;
             if ((*bitmap)[i][j]) continue;
-            for (int bi = i - 1; bi >= 0; bi--) 
+            for (int bi = i - 1; bi >= 0; bi--) {
                 if ((*bitmap)[bi][j]) {
                     above = 1; break;
                 }
-            for (int bi = i + 1; bi < ROWS; bi++) {
-                if ((*bitmap)[bi][j]) {
-                    below = 1; break;
-                }
             }
-            holes[i][j] = above && below;
+            if (i == 0)
+                above = 1;
+            holes[i][j] = above;
 
         }
     }
@@ -330,7 +331,7 @@ int heuristic(Bitmap* bitmap, int score) {
         }
 
         if (holes_in_row > 0)
-            h_row_holes += COLS - holes_in_row;
+            h_row_holes += holes_in_row;
     }
 
     h -= h_row_holes * HOLE_MULT;
@@ -340,15 +341,15 @@ int heuristic(Bitmap* bitmap, int score) {
     int evenness = 0;
     int prev_height = 0;
     int r = 0, j = 0, diff;
-    while (!(*bitmap)[r][j]) r++;
+    while (r < ROWS && !(*bitmap)[r][j]) r++;
     prev_height = r;
 
     for(j = 1; j < COLS; j++) {
         r = 0;
-        while (!(*bitmap)[r][j]) r++;
+        while (r < ROWS && !(*bitmap)[r][j]) r++;
         diff = prev_height - r;
         if (diff < 0) diff *= -1;
-        evenness += diff;
+        evenness += diff * diff;
         prev_height = r;
     }
     h -= EVEN_MULT * evenness;
@@ -356,7 +357,7 @@ int heuristic(Bitmap* bitmap, int score) {
     return h;
 }
 
-const int AHEAD = 5, ROTATIONS = 4, NUM_KEEP = 1000;
+const int AHEAD = 5, ROTATIONS = 4, NUM_KEEP = 50;
 
 struct extra {
     // Number of times to move right from the left edge; number of rotations; score added.
@@ -385,7 +386,7 @@ int main(int argc, char** argv) {
 
     for (int x = 0; x < AHEAD; x++) {
         vector<pair<Board*, extra> > new_candidates;
-        fprintf(stderr, "%d candidates\n", (int) candidates.size());
+        //fprintf(stderr, "%d candidates\n", (int) candidates.size());
 
         for (int c = 0; c < (int) candidates.size(); c++) {
             Board *board = candidates[c].first;
@@ -402,20 +403,20 @@ int main(int argc, char** argv) {
 
             do {
                 for (int i = 0; i < ROTATIONS; i++) {
-                    int score;
+                    int score = 0;
+                    Block copy_block = *board->block;
                     Board *new_board = board->place(&score);
                     extra new_e = e;
                     new_e.score += score;
 
                     // Set first move but only if it's first
-                    if (e.rights == -1) {
+                    if (new_e.rights == -1) {
                         new_e.rights = rights;
                         new_e.rotates = i;
-                    } else {
-
                     }
 
                     new_candidates.push_back(make_pair(new_board, new_e));
+                    board->block = &copy_block;
                     board->block->checked_rotate(*board);
                 }
 
@@ -441,7 +442,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < min((int) sorted_candidates.size(), NUM_KEEP); i++)
             candidates.push_back(new_candidates[sorted_candidates[i].second]);
 
-        fprintf(stderr, "X is %d\n", x);
+        //fprintf(stderr, "X is %d\n", x);
     }
 
     Board *board = new Board(state);
