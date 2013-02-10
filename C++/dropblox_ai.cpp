@@ -1,4 +1,6 @@
 #include "dropblox_ai.h"
+#include <algorithm>
+#include <cassert>
 
 using namespace json;
 using namespace std;
@@ -117,7 +119,7 @@ void Block::do_command(const string& command) {
 }
 
 void Block::do_commands(const vector<string>& commands) {
-    for (int i = 0; i < commands.size(); i++) {
+    for (int i = 0; i < (int) commands.size(); i++) {
         do_command(commands[i]);
     }
 }
@@ -190,7 +192,7 @@ Board* Board::do_commands(const vector<string>& commands) {
     if (!check(*block)) {
         throw Exception("Block started in an invalid position");
     }
-    for (int i = 0; i < commands.size(); i++) {
+    for (int i = 0; i < (int) commands.size(); i++) {
         if (commands[i] == "drop") {
             return place();
         } else {
@@ -213,7 +215,7 @@ Board* Board::do_commands(const vector<string>& commands) {
 //
 // If there are no blocks left in the preview list, this method will fail badly!
 // This is okay because we don't expect to look ahead that far.
-Board* Board::place() {
+Board* Board::place(int *score = NULL) {
     Board* new_board = new Board();
 
     while (check(*block)) {
@@ -240,10 +242,13 @@ Board* Board::place() {
         }
         new_board->bitmap[point.i][point.j] = 1;
     }
-    Board::remove_rows(&(new_board->bitmap));
+    int rows_removed = Board::remove_rows(&(new_board->bitmap));
+
+    if (score != NULL)
+        *score = (1 << rows_removed) - 1;
 
     new_board->block = preview[0];
-    for (int i = 1; i < preview.size(); i++) {
+    for (int i = 1; i < (int) preview.size(); i++) {
         new_board->preview.push_back(preview[i]);
     }
 
@@ -252,7 +257,7 @@ Board* Board::place() {
 
 // A static method that takes in a new_bitmap and removes any full rows from it.
 // Mutates the new_bitmap in place.
-void Board::remove_rows(Bitmap* new_bitmap) {
+int Board::remove_rows(Bitmap* new_bitmap) {
     int rows_removed = 0;
     for (int i = ROWS - 1; i >= 0; i--) {
         bool full = true;
@@ -275,8 +280,10 @@ void Board::remove_rows(Bitmap* new_bitmap) {
             (*new_bitmap)[i][j] = 0;
         }
     }
+    return rows_removed;
 }
 
+// END OF PREWRITTEN CODE
 
 int holes[ROWS][COLS];
 int heuristic(Bitmap* bitmap, int score) {
@@ -345,25 +352,108 @@ int heuristic(Bitmap* bitmap, int score) {
     return h;
 }
 
+const int AHEAD = 6, ROTATIONS = 4, NUM_KEEP = 1000;
+
+struct extra {
+    // Number of times to move right from the left edge; number of rotations; score added.
+    int rights;
+    int rotates;
+    int score;
+
+    extra(int a = 0, int b = 0, int c = 0) {
+        rights = a;
+        rotates = b;
+        score = c;
+    }
+};
+
 int main(int argc, char** argv) {
     // Construct a JSON Object with the given game state.
+    assert(argc >= 2);
     istringstream raw_state(argv[1]);
     Object state;
     Reader::Read(state, raw_state);
 
     // Construct a board from this Object.
-    Board board(state);
+    Board *initial = new Board(state);
+    vector<pair<Board*, extra> > candidates;
+    candidates.push_back(make_pair(initial, extra(-1, -1, 0)));
+
+    for (int x = 0; x < AHEAD; x++) {
+        vector<pair<Board*, extra> > new_candidates;
+
+        for (int c = 0; c < (int) candidates.size(); c++) {
+            Board *board = candidates[c].first;
+            extra e = candidates[c].second;
+
+            // Move it all the way up and left
+            while (board->block->checked_up(*board))
+                ;
+
+            while (board->block->checked_left(*board))
+                ;
+
+            int rights = 0;
+
+            do {
+                for (int i = 0; i < ROTATIONS; i++) {
+                    int score;
+                    Board *new_board = board->place(&score);
+                    extra new_e;
+                    new_e.score = e.score + score;
+
+                    // Set first move but only if it's first
+                    if (e.rights == -1) {
+                        new_e.rights = rights;
+                        new_e.rotates = i;
+                    }
+
+                    new_candidates.push_back(make_pair(new_board, new_e));
+                    board->block->checked_rotate(*board);
+                }
+
+                rights++;
+            } while (board->block->checked_right(*board));
+        }
+
+        // Check by hashing that everything is distinct
+
+        // Remove all but the best NUM_KEEP
+        vector<pair<int, int> > sorted_candidates;
+
+        for (int i = 0; i < (int) new_candidates.size(); i++) {
+            Board *board = new_candidates[i].first;
+            // TODO: see if these parentheses are really necessary
+            int value = heuristic(&(board->bitmap), new_candidates[i].second.score);
+            sorted_candidates.push_back(make_pair(value, i));
+        }
+
+        sort(sorted_candidates.rbegin(), sorted_candidates.rend());
+        candidates.clear();
+
+        for (int i = 0; i < min((int) sorted_candidates.size(), NUM_KEEP); i++)
+            candidates.push_back(new_candidates[sorted_candidates[i].second]);
+    }
+
+    Board *board = new Board(state);
+    extra move = candidates[0].second;
 
     // Make some moves!
     vector<string> moves;
-    while (board.check(*board.block)) {
-        board.block->left();
-        cout << heuristic(&(board.bitmap), 0) << endl;
+
+    while (board->block->checked_left(*board)) {
         moves.push_back("left");
     }
-    // Ignore the last move, because it moved the block into invalid
-    // position. Make all the rest.
-    for (int i = 0; i < moves.size() - 1; i++) {
-        cout << moves[i] << endl;
+
+    for (int i = 0; i < move.rights; i++)
+        moves.push_back("right");
+
+    for (int i = 0; i < move.rotates; i++)
+        moves.push_back("rotate");
+
+    for (int i = 0; i < (int) moves.size(); i++) {
+        cout << moves[i] << '\n';
     }
+
+    cout << flush;
 }
